@@ -50,7 +50,7 @@ ws.on("connection", (socket) => {
         const upvotes = yield prisma.upvotes.create({
             data: {
                 SongId: songId,
-                UserId: "79653ee5-f4fd-42af-a420-ba4c4d93bdd8",
+                UserId: userId,
                 SpaceId: dataInObjectFormat.spaceId
             }
         });
