@@ -16,50 +16,68 @@ const ws = new WebSocketServer({server:httpServer})
 
 ws.on("connection",(socket) => {
   console.log("connected")
-  socket.send("you are connected to a websocket server")
+  // socket.send("you are connected to a websocket server")
 
   socket.on("message",async (data) => {
     const dataInObjectFormat = JSON.parse(String(data))
-      const userRecord = await prisma.spaces.findFirst({
-        select:{
-          userId:true
-        },
-        where:{
-          spacesId:dataInObjectFormat.spaceId
-        }
-      })
+      // const userRecord = await prisma.spaces.findFirst({
+      //   select:{
+      //     userId:true
+      //   },
+      //   where:{
+      //     spacesId:dataInObjectFormat.spaceId
+      //   }
+      // })
       
-      const songRecord= await prisma.songs.findFirst({
-        where:{
-          url:dataInObjectFormat.url
-        },
-        select:{
-          songId:true
-        }
-      })
+      // const songRecord= await prisma.songs.findFirst({
+      //   where:{
+      //     songId:dataInObjectFormat.songId
+      //   },
+      //   select:{
+      //     songId:true
+      //   }
+      // })   
       
-      const userId = userRecord?.userId;
-      const songId = songRecord?.songId;
+    const userId:string = dataInObjectFormat.userId;
+    const songId:string = dataInObjectFormat.songId;
 
-      console.log(userId)
+    // console.log(userId)
+
+    try{
 
       const upvotes = await prisma.upvotes.create({
         data:{
-          SongId:songId as string,
-          UserId:userId as string,
+          SongId:songId,
+          UserId:userId,
           SpaceId:dataInObjectFormat.spaceId
         }
       })
-    
+      
+      const upvoteCount = await prisma.upvotes.count({
+        where:{
+          SongId:songId
+        }
+      })
+      
       console.log(upvotes)
-
-    console.log(dataInObjectFormat);
-    ws.clients.forEach((client) => {
-      if(client.readyState == WebSocket.OPEN){
-      const dataInString = String(data)
-      client.send("message :- "+dataInString)
-      }
-    })
+      
+      console.log(dataInObjectFormat);
+      console.log({
+        songId:upvotes.SongId,
+        upvoteCount:upvoteCount
+      })
+      ws.clients.forEach((client) => {
+        if(client.readyState == WebSocket.OPEN){
+          // const dataInString = String(data)
+          client.send(JSON.stringify({
+            songId:upvotes.SongId,
+            upvoteCount:upvoteCount
+          }))
+        }
+      })
+    }catch(err){
+      socket.send("something went wrong")
+    }
   })
 })
 
