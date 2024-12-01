@@ -25,29 +25,100 @@ const httpServer = app.listen(8080, () => {
 const ws = new ws_1.WebSocketServer({ server: httpServer });
 ws.on("connection", (socket) => {
     console.log("connected");
-    // socket.send("you are connected to a websocket server")
     socket.on("message", (data) => __awaiter(void 0, void 0, void 0, function* () {
+        const parsedData = JSON.parse(String(data));
+        console.log(parsedData.type);
+        if (parsedData.type === "active") {
+            const songId = parsedData.songId;
+            const song = yield prisma.songs.update({
+                where: {
+                    songId: songId
+                },
+                data: {
+                    active: true
+                }
+            });
+            console.log(song);
+            ws.clients.forEach((client) => {
+                if (client.readyState == ws_1.WebSocket.OPEN) {
+                    client.send(JSON.stringify({
+                        type: "active",
+                        url: song.url,
+                        songId: song.songId
+                    }));
+                }
+            });
+            return;
+        }
+        if (parsedData.type === "inactive") {
+            console.log("enter into inactive");
+            const prevSongId = parsedData.prevSongId;
+            const newSongId = parsedData.newSongId;
+            console.log("aiogirogiaowgioarhgioaigorehgiohaiogERO");
+            console.log(prevSongId + "   " + newSongId);
+            yield prisma.songs.update({
+                where: {
+                    songId: prevSongId
+                },
+                data: {
+                    active: false
+                }
+            });
+            const activeSong = yield prisma.songs.update({
+                where: {
+                    songId: newSongId
+                },
+                data: {
+                    active: true
+                }
+            });
+            // console.log(activeSong.songId)
+            ws.clients.forEach((client) => {
+                try {
+                    if (client.readyState == ws_1.WebSocket.OPEN) {
+                        client.send(JSON.stringify({
+                            type: "inactive",
+                            url: activeSong.url,
+                            songId: activeSong.songId
+                        }));
+                    }
+                }
+                catch (err) {
+                    console.log("Error occured in type inactive ");
+                }
+            });
+            return;
+        }
+        if (parsedData.type === "deleteUpvote") {
+            const deletedSong = yield prisma.upvotes.deleteMany({
+                where: {
+                    SongId: parsedData.songId
+                }
+            });
+            ws.clients.forEach((client) => {
+                if (client.readyState == ws_1.WebSocket.OPEN) {
+                    client.send(JSON.stringify({
+                        type: "deleteUpvote",
+                        songId: parsedData.songId
+                    }));
+                }
+            });
+            return;
+        }
         const dataInObjectFormat = JSON.parse(String(data));
-        // const userRecord = await prisma.spaces.findFirst({
-        //   select:{
-        //     userId:true
-        //   },
-        //   where:{
-        //     spacesId:dataInObjectFormat.spaceId
-        //   }
-        // })
-        // const songRecord= await prisma.songs.findFirst({
-        //   where:{
-        //     songId:dataInObjectFormat.songId
-        //   },
-        //   select:{
-        //     songId:true
-        //   }
-        // })   
         const userId = dataInObjectFormat.userId;
         const songId = dataInObjectFormat.songId;
-        // console.log(userId)
+        const spaceId = dataInObjectFormat.spaceId;
         try {
+            // const upvoteFound = await prisma.upvotes.findUnique({
+            //   where:{
+            //     UserId_SongId:{
+            //       SongId:songId,
+            //       UserId:userId
+            //     },
+            //     SpaceId:spaceId
+            //   }
+            // })
             const upvotes = yield prisma.upvotes.create({
                 data: {
                     SongId: songId,
@@ -77,17 +148,8 @@ ws.on("connection", (socket) => {
             });
         }
         catch (err) {
+            console.log(err);
             socket.send("something went wrong");
         }
     }));
 });
-// app.get('/',async (req,res) => {  
-//   const users = await prisma.user.findMany({
-//     where:{}
-//   })
-//   console.log(users)
-//   res.send("hello from the server")
-// })
-// app.listen(3000,() => {
-//   console.log("sever is listening on port 3000..")
-// })

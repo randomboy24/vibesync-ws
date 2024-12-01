@@ -34,18 +34,20 @@ model Songs {
   songId String @id @default(uuid())
   name String?
   url String
+  active Boolean @default(false)
   spaceId String 
   Space Spaces @relation(fields: [spaceId],references: [spacesId])
   Upvotes Upvotes[]
 }
 
 model Upvotes {
-  voteId String @id @default(uuid())
   SongId String 
   UserId String 
   SpaceId String
   User User @relation(fields: [UserId],references: [userId])
   Songs Songs @relation(fields: [SongId],references: [songId])
   Spaces Spaces @relation(fields: [SpaceId],references: [spacesId])
-  @@unique([UserId,SongId])
+  @@id([UserId,SongId])
 }
+
+  
