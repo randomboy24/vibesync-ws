@@ -20,7 +20,7 @@ const app = (0, express_1.default)();
 app.use((0, cors_1.default)());
 const prisma = new client_1.PrismaClient();
 const httpServer = app.listen(8080, () => {
-    console.log("listening on port 8080");
+    console.log("listening on port 8080 ");
 });
 const ws = new ws_1.WebSocketServer({ server: httpServer });
 ws.on("connection", (socket) => {
@@ -50,11 +50,11 @@ ws.on("connection", (socket) => {
             });
             return;
         }
-        if (parsedData.type === "inactive") {
-            console.log("enter into inactive");
+        if (parsedData.type === "nextSong") {
+            console.log("enter into nextSong");
             const prevSongId = parsedData.prevSongId;
             const newSongId = parsedData.newSongId;
-            console.log("aiogirogiaowgioarhgioaigorehgiohaiogERO");
+            console.log("aiogirogiaowgioarhgioasigorehgiohaiogERO");
             console.log(prevSongId + "   " + newSongId);
             yield prisma.songs.update({
                 where: {
@@ -77,14 +77,14 @@ ws.on("connection", (socket) => {
                 try {
                     if (client.readyState == ws_1.WebSocket.OPEN) {
                         client.send(JSON.stringify({
-                            type: "inactive",
+                            type: "nextSong",
                             url: activeSong.url,
                             songId: activeSong.songId
                         }));
                     }
                 }
                 catch (err) {
-                    console.log("Error occured in type inactive ");
+                    console.log("Error occured in type nextSong ");
                 }
             });
             return;
@@ -100,6 +100,34 @@ ws.on("connection", (socket) => {
                     client.send(JSON.stringify({
                         type: "deleteUpvote",
                         songId: parsedData.songId
+                    }));
+                }
+            });
+            return;
+        }
+        if (parsedData.type === "deleteOneUpvote") {
+            const song = yield prisma.upvotes.delete({
+                where: {
+                    UserId_SongId: {
+                        SongId: parsedData.songId,
+                        UserId: parsedData.userId,
+                    },
+                },
+            });
+            const upvoteCount = yield prisma.upvotes.count({
+                where: {
+                    SongId: parsedData.songId
+                }
+            });
+            console.log("boom");
+            console.log(song);
+            ws.clients.forEach((client) => {
+                if (client.readyState == ws_1.WebSocket.OPEN) {
+                    client.send(JSON.stringify({
+                        type: "deleteOneUpvote",
+                        songId: song.SongId,
+                        userId: song.UserId,
+                        upvoteCount: upvoteCount
                     }));
                 }
             });
@@ -141,6 +169,7 @@ ws.on("connection", (socket) => {
                 if (client.readyState == ws_1.WebSocket.OPEN) {
                     // const dataInString = String(data)
                     client.send(JSON.stringify({
+                        userId: userId,
                         songId: upvotes.SongId,
                         upvoteCount: upvoteCount
                     }));
