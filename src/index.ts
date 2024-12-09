@@ -1,195 +1,233 @@
-import express from "express"
-import cors from "cors"
+import express from "express";
+import cors from "cors";
 import { WebSocket, WebSocketServer } from "ws";
 import { PrismaClient } from "@prisma/client";
+import cluster from "cluster";
+import os from "os";
+import axios from "axios";
+import { createClient } from "redis";
+import { PubsubManager } from "./pubSubManager";
 
-const app = express();  
-app.use(cors())
+async function main() {
+  const app = express();
+  app.use(cors());
 
-const prisma = new PrismaClient();
+  const pubSubManager = PubsubManager.getInstance();
+  const prisma = new PrismaClient();
 
-const httpServer = app.listen(8080,() => {
-  console.log("listening on port 8080 ")
-})
+  if (cluster.isPrimary) {
+    const ncpus = os.cpus().length;
+    for (let i = 0; i < ncpus; i++) {
+      cluster.fork();
+    }
+    cluster.on("exit", () => {
+      cluster.fork();
+    });
+    return;
+  }
+  const httpServer = app.listen(8080, () => {
+    console.log("listening on port 8080 ");
+  });
 
-const ws = new WebSocketServer({server:httpServer})
+  const ws = new WebSocketServer({ server: httpServer });
 
-ws.on("connection",(socket) => {
-  console.log("connected")
+  pubSubManager.subscribe({ channel: "channel", ws: ws });
 
-  socket.on("message",async (data) => {
+  ws.on("connection", (socket) => {
+    console.log("connected");
 
-    const parsedData = JSON.parse(String(data))
+    socket.on("message", async (data) => {
+      const parsedData = JSON.parse(String(data));
 
-    console.log(parsedData.type)
-    if(parsedData.type === "active"){
-      const songId = parsedData.songId  
-      const song = await prisma.songs.update({
-          where:{
-            songId:songId
-          },  
-          data:{
-            active:true
+      switch (parsedData.type) {
+        case "active":
+          try {
+            const songId = parsedData.songId;
+            const song = await prisma.songs.update({
+              where: {
+                songId: songId,
+              },
+              data: {
+                active: true,
+              },
+            });
+
+            pubSubManager.publish({
+              message: JSON.stringify({
+                type: "active",
+                url: song.url,
+                songId: song.songId,
+              }),
+            });
+          } catch (err) {
+            console.log("something went wrong in active type");
+            console.log(err);
           }
-      })
 
-      console.log(song)
+          break;
+        case "nextSong":
+          try {
+            console.log("enter into nextSong");
+            const prevSongId = parsedData.prevSongId;
+            const newSongId = parsedData.newSongId;
+            console.log("aiogirogiaowgioarhgioasigorehgiohaiogERO");
+            console.log(prevSongId + "   " + newSongId);
 
-      ws.clients.forEach((client) => {
-        if(client.readyState == WebSocket.OPEN){
-          client.send(JSON.stringify({  
-            type:"active",  
-            url:song.url,
-            songId:song.songId
-          }))
-        }
-      })
-      return;
-    }
+            await prisma.songs.update({
+              where: {
+                songId: prevSongId,
+              },
+              data: {
+                active: false,
+              },
+            });
 
-    if(parsedData.type === "nextSong"){
-      console.log("enter into nextSong")
-      const prevSongId = parsedData.prevSongId;
-      const newSongId = parsedData.newSongId;
-      console.log("aiogirogiaowgioarhgioasigorehgiohaiogERO")
-      console.log(prevSongId+ "   "+newSongId)
+            const activeSong = await prisma.songs.update({
+              where: {
+                songId: newSongId,
+              },
+              data: {
+                active: true,
+              },
+            });
 
-      await prisma.songs.update({
-          where:{
-            songId:prevSongId
-          },
-          data:{
-            active:false
-          } 
-        })
-
-      const activeSong = await prisma.songs.update({
-        where:{
-          songId:newSongId  
-        },
-        data:{
-          active:true
-        }
-      })
-
-      // console.log(activeSong.songId)
-
-      ws.clients.forEach((client) => {
-        try {  
-          if(client.readyState == WebSocket.OPEN){
-            client.send(JSON.stringify({
-              type:"nextSong",
-              url:activeSong.url,
-              songId:activeSong.songId
-            }))
+            pubSubManager.publish({
+              message: JSON.stringify({
+                type: "nextSong",
+                url: activeSong.url,
+                songId: activeSong.songId,
+              }),
+            });
+          } catch (err) {
+            console.log("something went wrong with nextSong type");
+            console.log(err);
           }
-        }catch(err){
-          console.log("Error occured in type nextSong ")
-        }
-      })
-      return;
-    }
+          break;
+        case "deleteUpvote":
+          try {
+            const deletedSong = await prisma.upvotes.deleteMany({
+              where: {
+                SongId: parsedData.songId,
+              },
+            });
 
-    if(parsedData.type === "deleteUpvote"){
-      const deletedSong = await prisma.upvotes.deleteMany({
-        where:{
-          SongId:parsedData.songId
-        }
-      })
+            pubSubManager.publish({
+              message: JSON.stringify({
+                type: "deleteUpvote",
+                songId: parsedData.songId,
+              }),
+            });
+          } catch (err) {
+            console.log("something went wrong with the deleteUpvote type");
+            console.log(err);
+          }
+          break;
+        case "deleteOneUpvote":
+          try {
+            const song = await prisma.upvotes.delete({
+              where: {
+                UserId_SongId: {
+                  SongId: parsedData.songId,
+                  UserId: parsedData.userId,
+                },
+              },
+            });
 
-      ws.clients.forEach((client) => {
-        if(client.readyState == WebSocket.OPEN){
-          client.send(JSON.stringify({
-            type:"deleteUpvote",
-            songId:parsedData.songId  
-          }))
-        }
-      })
-      return;
-    }
-    if (parsedData.type === "deleteOneUpvote") {
-      const song = await prisma.upvotes.delete({
-        where: {
-          UserId_SongId: {
-            SongId: parsedData.songId,
-            UserId: parsedData.userId,
-          },
-        },
-      });
+            const upvoteCount = await prisma.upvotes.count({
+              where: {
+                SongId: parsedData.songId,
+              },
+            });
+            console.log("boom");
+            console.log(song);
 
+            pubSubManager.publish({
+              message: JSON.stringify({
+                type: "deleteOneUpvote",
+                songId: song.SongId,
+                userId: song.UserId,
+                upvoteCount: upvoteCount,
+              }),
+            });
+          } catch (err) {
+            console.log("something went wrong with deleteOneUpvote type");
+            console.log(err);
+          }
+          break;
+        case "addSong":
+          try {
+            const response = await axios.get(
+              `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${parsedData.url}&key=${process.env.YOUTUBE_APIKEY}`
+            );
+            console.log("title is \n");
 
-      const upvoteCount = await prisma.upvotes.count({
-        where:{
-          SongId:parsedData.songId
-        }
-      })
-      console.log("boom")
-      console.log(song)
+            const name = response.data.items[0].snippet.title;
+            console.log(parsedData.spaceId + parsedData.url + name);
+            const song = await prisma.songs.create({
+              data: {
+                spaceId: parsedData.spaceId,
+                url: parsedData.url,
+                name: name,
+                active: false,
+              },
+            });
+            console.log(song);
 
-      ws.clients.forEach((client) => {
-        if(client.readyState == WebSocket.OPEN){
-          client.send(JSON.stringify({
-            type:"deleteOneUpvote",
-            songId:song.SongId,
-            userId:song.UserId,
-            upvoteCount:upvoteCount
-          }))
-        }
-      });
-      return;   
-    }    
-    
-    const dataInObjectFormat = JSON.parse(String(data))
-    const userId:string = dataInObjectFormat.userId;
-    const songId:string = dataInObjectFormat.songId;
-    const spaceId:string = dataInObjectFormat.spaceId
+            try {
+              pubSubManager.publish({
+                message: JSON.stringify({
+                  type: "addSong",
+                  songId: song.songId,
+                  name: song.name,
+                  url: song.url,
+                }),
+              });
+            } catch (err) {
+              console.log(err);
+            }
+          } catch (err) {
+            console.log("something went wrong with addSong message");
+          }
+          break;
 
-    try{
+        case "castUpvote":
+          try {
+            const { userId } = parsedData;
+            const { songId } = parsedData;
+            const { spaceId } = parsedData;
+            console.log(userId + spaceId + songId);
+            const upvotes = await prisma.upvotes.create({
+              data: {
+                SongId: songId,
+                UserId: userId,
+                SpaceId: spaceId,
+              },
+            });
 
-      // const upvoteFound = await prisma.upvotes.findUnique({
-      //   where:{
-      //     UserId_SongId:{
-      //       SongId:songId,
-      //       UserId:userId
-      //     },
-      //     SpaceId:spaceId
-      //   }
-      // })
-      const upvotes = await prisma.upvotes.create({
-        data:{
-          SongId:songId,
-          UserId:userId,
-          SpaceId:dataInObjectFormat.spaceId
-        }
-      })
-      
+            const upvoteCount = await prisma.upvotes.count({
+              where: {
+                SongId: songId,
+              },
+            });
 
-      const upvoteCount = await prisma.upvotes.count({
-        where:{
-          SongId:songId
-        }
-      })
-      
-      console.log(upvotes)
-      
-      console.log(dataInObjectFormat);
-      console.log({
-        songId:upvotes.SongId,
-        upvoteCount:upvoteCount
-      })
-      ws.clients.forEach((client) => {
-        if(client.readyState == WebSocket.OPEN){
-          // const dataInString = String(data)
-          client.send(JSON.stringify({
-            userId:userId,
-            songId:upvotes.SongId,
-            upvoteCount:upvoteCount
-          }))
-        }
-      })
-    }catch(err){
-      console.log(err)
-      socket.send("something went wrong")
-    }
-  })
-})
+            pubSubManager.publish({
+              message: JSON.stringify({
+                userId: userId,
+                type: "castUpvote",
+                songId: upvotes.SongId,
+                upvoteCount: upvoteCount,
+              }),
+            });
+          } catch (err) {
+            console.log(err);
+            socket.send("something went wrong");
+          }
+          break;
+        default:
+          console.log("unknown type " + parsedData.type);
+      }
+    });
+  });
+}
+
+main();
