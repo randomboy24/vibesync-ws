@@ -1,6 +1,7 @@
 import { create } from "domain";
 import { createClient, RedisClientType } from "redis";
 import { WebSocket, WebSocketServer } from "ws";
+import { socketIdToSocket, spaceIdToSocketIds } from ".";
 
 export class PubsubManager {
   private static instance: PubsubManager;
@@ -27,22 +28,25 @@ export class PubsubManager {
     channel?: string;
     message: string;
   }) {
-    await this.publisher.publish(channel || "channel", message);
+    console.log("Channel name = " + channel);
+    await this.publisher.publish(channel, message);
   }
 
-  public async subscribe({
-    channel = "channel",
-    ws,
-  }: {
-    channel: string;
-    ws: WebSocketServer;
-  }) {
+  public async subscribe({ channel = "channel" }: { channel: string }) {
     await this.subscriber.subscribe(channel, (message) => {
-      ws.clients.forEach((client) => {
-        if (client.readyState == WebSocket.OPEN) {
-          client.send(message);
+      console.log("message to send to fronted " + message);
+      const socketIds = spaceIdToSocketIds.get(channel);
+      if (!socketIds) {
+        return;
+      }
+      for (const socketId of socketIds) {
+        //@ts-ignore
+        console.log("message to send to fronted " + message);
+        const socket = socketIdToSocket.get(socketId);
+        if (socket && socket.readyState == socket.OPEN) {
+          socket.send(message);
         }
-      });
+      }
     });
   }
 }

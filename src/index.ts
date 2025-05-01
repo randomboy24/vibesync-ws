@@ -5,8 +5,12 @@ import { PrismaClient } from "@prisma/client";
 import cluster from "cluster";
 import os from "os";
 import axios from "axios";
-import { createClient } from "redis";
+// import { createClient } from "redis";
 import { PubsubManager } from "./pubSubManager";
+import { randomUUID } from "crypto";
+
+export const socketIdToSocket = new Map<String, WebSocket>();
+export const spaceIdToSocketIds = new Map<String, Set<String>>();
 
 async function main() {
   const app = express();
@@ -31,15 +35,32 @@ async function main() {
 
   const ws = new WebSocketServer({ server: httpServer });
 
-  pubSubManager.subscribe({ channel: "channel", ws: ws });
+  // pubSubManager.subscribe({ channel: spaceId, ws: ws });
 
   ws.on("connection", (socket) => {
+    const socketId = randomUUID();
+    socketIdToSocket.set(socketId, socket);
     console.log("connected");
 
     socket.on("message", async (data) => {
       const parsedData = JSON.parse(String(data));
 
+      let spaceId = parsedData.spaceId;
+
       switch (parsedData.type) {
+        case "joinSpace":
+          // spaceId = parsedData.spaceId;
+          pubSubManager.subscribe({ channel: spaceId });
+
+          if (!spaceIdToSocketIds.has(spaceId)) {
+            spaceIdToSocketIds.set(spaceId, new Set());
+          }
+
+          spaceIdToSocketIds.get(spaceId)!.add(socketId);
+
+          console.log("spaceId = " + spaceId);
+
+          break;
         case "active":
           try {
             const songId = parsedData.songId;
@@ -58,6 +79,7 @@ async function main() {
                 url: song.url,
                 songId: song.songId,
               }),
+              channel: spaceId,
             });
           } catch (err) {
             console.log("something went wrong in active type");
@@ -97,6 +119,7 @@ async function main() {
                 url: activeSong.url,
                 songId: activeSong.songId,
               }),
+              channel: spaceId,
             });
           } catch (err) {
             console.log("something went wrong with nextSong type");
@@ -116,6 +139,7 @@ async function main() {
                 type: "deleteUpvote",
                 songId: parsedData.songId,
               }),
+              channel: spaceId,
             });
           } catch (err) {
             console.log("something went wrong with the deleteUpvote type");
@@ -148,6 +172,7 @@ async function main() {
                 userId: song.UserId,
                 upvoteCount: upvoteCount,
               }),
+              channel: spaceId,
             });
           } catch (err) {
             console.log("something went wrong with deleteOneUpvote type");
@@ -181,6 +206,7 @@ async function main() {
                   name: song.name,
                   url: song.url,
                 }),
+                channel: spaceId,
               });
             } catch (err) {
               console.log(err);
@@ -217,6 +243,7 @@ async function main() {
                 songId: upvotes.SongId,
                 upvoteCount: upvoteCount,
               }),
+              channel: spaceId,
             });
           } catch (err) {
             console.log(err);
